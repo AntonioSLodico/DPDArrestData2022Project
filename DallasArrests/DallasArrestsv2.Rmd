@@ -1,0 +1,177 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+ 
+#read in data, add library
+```{r}
+DPDA <- read.csv("Police_Arrests.csv")
+DAC <- read.csv("Police_Arrest_Charges.csv")
+library(tidyverse)
+```
+#initial view of features, categories etc.
+```{r}
+str(DAC)
+```
+
+#add features for quick date/time EDA
+```{r}
+DAC$ArMo<- format(as.Date(DAC$ArrestDate), format="%m")
+DAC$ArMY<- format(as.Date(DAC$ArrestDate), format="%Y.%m")
+```
+
+#view blank and NA counts for each feature
+```{r}
+DACNA <- DAC %>% mutate_all(na_if,"")
+DACNACount <- as.data.frame(map(DACNA, ~sum(is.na(.))))
+```
+
+#Look at NIBRS feature sums to better grasp relationship between features in practice
+```{r}
+NIBRSSums <- DAC %>% group_by(NIBRS_Group, 
+                              NIBRS_Crime_Category, 
+                              NIBRS_Crime, 
+                              NIBRS_Code,
+                              NIBRS_CrimeAgainst) %>% summarize(count=n())
+```
+
+#See if warrant type might have a relationship to release type, and maybe gain insight into misc categoris
+```{r}
+WarrantSums <- DAC %>% group_by(WarrantType,
+                                ReleaseType) %>% summarize(count=n())
+```
+#look at warrant types not A, C, or blank, keep looking to see if any patterns are there, none so far
+```{r}
+WeirdWarrantTypes <- DAC %>% filter(!WarrantType %in% c("WRNT_C", "WRNT_A", ""))
+WeirdWarrantSums <- WeirdWarrantTypes %>% group_by(WarrantType, ChargeFlag, NIBRS_Code) %>% summarize(count=n())
+```
+
+#Year over year total arrests - count has been going down since 2017
+```{r}
+AnnualChargeTotal <- DAC %>% group_by(ArrestYr) %>% summarize(count=n())
+MonthlyChargeTotal <- DAC %>% group_by(ArMY, ArrestYr)  %>% summarize(count=n())
+
+a <- ggplot(AnnualChargeTotal, aes(ArrestYr, count))
+b <- ggplot(MonthlyChargeTotal, aes(ArMY, count, fill = ArrestYr))
+c <- ggplot(DAC, aes(ArrestDate))
+a + geom_line()
+c + geom_histogram(stat = "count") 
+b + geom_col()
+```
+
+```{r}
+arrestbytype <- DAC %>% group_by(ArAction, 
+                                 NIBRS_Crime_Category, ChargeFlag) %>% 
+  summarize(count=n())
+print(arrestbytype)
+```
+
+#Checking miscelaneous arrests for related and possible miscodes
+```{r}
+DACMisc <- filter(DAC, NIBRS_Code == "999")
+```
+
+#Filtering marijuana charges by category
+```{r}
+DACWeed <- filter(DAC, grepl("marijuana", ChargeDesc, ignore.case = TRUE))
+DACWeedSP <- filter(DACWeed, grepl("poss", ChargeDesc, ignore.case = TRUE))
+DACWeedSPP <- filter(DACWeed, grepl("<2oz", ChargeDesc, ignore.case = TRUE))
+DACWeedNoSPP <- filter(DACWeed, !grepl("<2oz", ChargeDesc, ignore.case = TRUE))
+```
+
+#Looking at distribution of charges over time
+```{r}
+DACWeedSum <- DACWeed %>% group_by(ChargeDesc, ArMY) %>% summarize(count=n())
+```
+
+#recoding marijuana charge descriptions to reduce categories
+```{r}
+DACWeedShort <- DACWeed %>% mutate(ChargeDescShort = recode(ChargeDesc, 
+  "POSS MARIJUANA <2OZ" = "Small Posession",
+  "POSS MARIJUANA <2OZ *DRUG FREE ZONE" = "Small Posession", 
+  "POSS MARIJUANA >2OZ< OR EQUAL 4OZ *DRUG FREE ZONE*" = "Medium posession",
+  "POSS MARIJUANA >2OZ< OR EQUAL 4OZ" = "Medium posession",
+  "POSS MARIJUANA >4OZ< OR EQUAL 5LBS" = "Large Posession",
+  "POSS MARIJUANA >4OZ< OR EQUAL 5LBS *DRUG FREE ZONE*" = "Large Posession",
+  "POSS MARIJUANA >50LBS< OR EQUAL 2,000LBS" = "Large Posession",
+  "POSS MARIJUANA >5LBS< OR EQUAL 50LBS" = "Large Posession",
+  "POSS MARIJUANA >5LBS *DRUG FREE ZONE*" = "Large Posession",
+  .default = "Delivery All"))
+```
+
+#Filter on simple posession under 20z to answer the question
+```{r}
+DACWeedShortNoSSP <- filter(DACWeedShort, ChargeDescShort != "Small Posession")
+```
+
+#Simple posession under 20z by month, year
+```{r}
+d <- ggplot(DACWeedSPP, aes(ArMo, fill = ChargeDesc))
+d + geom_bar() + facet_wrap(~ ArrestYr)
+```
+
+#all other posession types by month, year
+```{r}
+e <- ggplot(DACWeedShortNoSSP, aes(ArMo, fill = ChargeDescShort))
+e + geom_bar(position = "dodge") + facet_wrap(~ ArrestYr)
+```
+#Looking at related charges for patterns
+```{r}
+DACBSA <- filter(DAC, grepl("90", NIBRS_Code, ignore.case = TRUE))
+```
+
+```{r}
+table(DACBSA$NIBRS_Code)
+```
+```{r}
+f <- ggplot(DACBSA, aes(ArMY))
+f + geom_bar(position = "dodge") + facet_wrap(~ NIBRS_Code)
+```
+```{r}
+DAC90D <- filter(DACBSA, NIBRS_Code == "90D")
+DAC90E <- filter(DACBSA, NIBRS_Code == "90E")
+DAC90Z <- filter(DACBSA, NIBRS_Code == "90Z")
+
+Dd <- ggplot(DAC90D, aes(ArMo))
+De <- ggplot(DAC90E, aes(ArMo))
+Dz <- ggplot(DAC90Z, aes(ArMo))
+```
+
+```{r}
+Dz + geom_bar(position = "dodge") + facet_wrap(~ ArrestYr)
+Dd + geom_bar(position = "dodge") + facet_wrap(~ ArrestYr)
+De + geom_bar(position = "dodge") + facet_wrap(~ ArrestYr)
+```
+
+
+#inspecting all 35A offenses
+```{r}
+
+DACNarcRelated <- filter(DAC, UCROffense == "NARCOTICS & DRUGS")
+
+DACNR <- DACNarcRelated %>% group_by(ChargeFlag,
+                                     Severity,
+                                     ChargeDesc) %>% summarize(count=n())
+DACNRBlank <- filter(DACNarcRelated, ChargeDesc == "")
+sum(DACNR$count)
+```
+
+# Confirm NIBRS hierarchies - Group> Crime Category > Crime, and 1:1 between Crime and Code
+```{r}
+nibrsCvsCC <- as.data.frame(table(DAC$NIBRS_Crime, DAC$NIBRS_Crime_Category))
+nibrsCvsCC <- filter(nibrsCvsCC, nibrsCvsCC$Freq >0)
+```
+```{r}
+nibrsCODEvsCC <- as.data.frame(table(DAC$NIBRS_Code, DAC$NIBRS_Crime_Category))
+nibrsCODEvsCC <- filter(nibrsCODEvsCC, Freq >0)
+```
+
+```{r}
+length(unique(DAC$NIBRS_Group, DAC$NIBRS_Crime_Category, DAC$NIBRS_Code, DAC$NIBRS_Crime))
+length(unique(DAC$NIBRS_Crime))
+```
+
+#comparing UCS to NIBRS
+```{r}
+ucrVSnibrs <- as.data.frame(table(DAC$UCRWord, DAC$NIBRS_Crime_Category))
+ucrVSnibrs2 <- filter(ucrVSnibrs, ucrVSnibrs$Freq >0)
